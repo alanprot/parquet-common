@@ -16,7 +16,6 @@ package convert
 import (
 	"context"
 	"fmt"
-	"math"
 	"math/rand"
 	"slices"
 	"strconv"
@@ -428,7 +427,7 @@ func rowToSeries(t *testing.T, s *parquet.Schema, dec *schema.PrometheusParquetC
 			}
 
 			if schema.IsDataColumn(col) && dec != nil {
-				c, err := dec.Decode(colVal.ByteArray(), 0, math.MaxInt64)
+				c, err := dec.Decode(colVal.ByteArray())
 				if err != nil {
 					return nil, nil, err
 				}

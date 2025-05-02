@@ -120,7 +120,7 @@ func NewPrometheusParquetChunksDecoder(pool chunkenc.Pool) *PrometheusParquetChu
 	}
 }
 
-func (e *PrometheusParquetChunksDecoder) Decode(data []byte, mint, maxt int64) ([]chunks.Meta, error) {
+func (e *PrometheusParquetChunksDecoder) Decode(data []byte) ([]chunks.Meta, error) {
 	result := make([]chunks.Meta, 0, len(data))
 
 	b := bytes.NewBuffer(data)
@@ -133,9 +133,6 @@ func (e *PrometheusParquetChunksDecoder) Decode(data []byte, mint, maxt int64) (
 	minTime, err := binary.ReadUvarint(b)
 	if err != nil {
 		return nil, err
-	}
-	if int64(minTime) > maxt {
-		return nil, nil
 	}
 
 	maxTime, err := binary.ReadUvarint(b)
@@ -152,13 +149,11 @@ func (e *PrometheusParquetChunksDecoder) Decode(data []byte, mint, maxt int64) (
 		return nil, err
 	}
 
-	if int64(maxTime) >= mint {
-		result = append(result, chunks.Meta{
-			MinTime: int64(minTime),
-			MaxTime: int64(maxTime),
-			Chunk:   chk,
-		})
-	}
+	result = append(result, chunks.Meta{
+		MinTime: int64(minTime),
+		MaxTime: int64(maxTime),
+		Chunk:   chk,
+	})
 
 	return result, nil
 }

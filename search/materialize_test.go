@@ -91,12 +91,16 @@ func TestMaterializeE2E(t *testing.T) {
 
 		// Test first column only
 		found := query(t, data.minTime, data.minTime+colDuration.Milliseconds()-1, lf, cf, c1, c2)
+		require.Equal(t, found[0].Labels().Get(labels.MetricName), "metric_0")
+		require.Equal(t, found[0].Labels().Get("unique"), "unique_0")
 		require.Len(t, found, 1)
 		require.Len(t, found[0].(*concreteChunksSeries).chks, 1)
 
 		// Test first two columns
 		found = query(t, data.minTime, data.minTime+(2*colDuration).Milliseconds()-1, lf, cf, c1, c2)
 		require.Len(t, found, 1)
+		require.Equal(t, found[0].Labels().Get(labels.MetricName), "metric_0")
+		require.Equal(t, found[0].Labels().Get("unique"), "unique_0")
 		require.Len(t, found[0].(*concreteChunksSeries).chks, 2)
 	})
 }
@@ -198,7 +202,7 @@ func query(t *testing.T, mint, maxt int64, lf, cf *parquet.File, constraints ...
 	s, err := schema.FromLabelsFile(lf)
 	require.NoError(t, err)
 	d := schema.NewPrometheusParquetChunksDecoder(chunkenc.NewPool())
-	m, err := NewMaterializer(s, d, lf, cf)
+	m, err := NewMaterializer(d, lf, cf)
 	require.NoError(t, err)
 
 	found := make([]storage.ChunkSeries, 0, 100)
@@ -209,7 +213,7 @@ func query(t *testing.T, mint, maxt int64, lf, cf *parquet.File, constraints ...
 			total += r.count
 		}
 		require.NoError(t, err)
-		series, err := m.Materialize(ctx, i, mint, maxt, rr)
+		series, err := m.Materialize(ctx, i, s.DataColsFromMinMax(mint, maxt), rr)
 		require.NoError(t, err)
 		require.Len(t, series, int(total))
 		found = append(found, series...)

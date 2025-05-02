@@ -109,14 +109,12 @@ func (b *Builder) Build() (*TSDBSchema, error) {
 		dc[i] = lc.ColumnIndex
 	}
 
-	return &TSDBSchema{
-		Schema:            s,
-		Metadata:          b.metadata,
-		DataColDurationMs: b.dataColDurationMs,
-		DataColsIndexes:   dc,
-		MinTs:             b.mint,
-		MaxTs:             b.maxt,
-	}, nil
+	return newTSDBSchema(s, b.metadata, b.mint, b.maxt, b.dataColDurationMs, dc)
+}
+
+type TSDBProjection struct {
+	Schema       *parquet.Schema
+	ExtraOptions []parquet.WriterOption
 }
 
 type TSDBSchema struct {
@@ -126,11 +124,43 @@ type TSDBSchema struct {
 	DataColsIndexes   []int
 	MinTs, MaxTs      int64
 	DataColDurationMs int64
+
+	ChunksProjection *TSDBProjection
+	LabelsProjection *TSDBProjection
 }
 
-type TSDBProjection struct {
-	Schema       *parquet.Schema
-	ExtraOptions []parquet.WriterOption
+func newTSDBSchema(s *parquet.Schema, md map[string]string, minT, maxT, dataColDurationMs int64, cIndexes []int) (*TSDBSchema, error) {
+	ts := &TSDBSchema{
+		Schema:            s,
+		Metadata:          md,
+		DataColDurationMs: dataColDurationMs,
+		DataColsIndexes:   cIndexes,
+		MinTs:             minT,
+		MaxTs:             maxT,
+	}
+
+	var err error
+	ts.ChunksProjection, err = ts.buildChunksProjection()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build chunks projection")
+	}
+
+	ts.LabelsProjection, err = ts.buildLabelsProjection()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build labels projection")
+	}
+
+	return ts, nil
+}
+
+func (s *TSDBSchema) DataColsFromMinMax(minT, maxT int64) []string {
+	minDataCol := s.DataColumIdx(minT)
+	maxDataCol := s.DataColumIdx(maxT)
+	r := make([]string, maxDataCol-minDataCol+1)
+	for i := minDataCol; i <= maxDataCol; i++ {
+		r[i] = DataColumn(i)
+	}
+	return r
 }
 
 func (s *TSDBSchema) DataColumIdx(t int64) int {
@@ -143,7 +173,7 @@ func (s *TSDBSchema) DataColumIdx(t int64) int {
 	return colIdx
 }
 
-func (s *TSDBSchema) LabelsProjection() (*TSDBProjection, error) {
+func (s *TSDBSchema) buildLabelsProjection() (*TSDBProjection, error) {
 	g := make(parquet.Group)
 
 	lc, ok := s.Schema.Lookup(ColIndexes)
@@ -167,7 +197,7 @@ func (s *TSDBSchema) LabelsProjection() (*TSDBProjection, error) {
 	}, nil
 }
 
-func (s *TSDBSchema) ChunksProjection() (*TSDBProjection, error) {
+func (s *TSDBSchema) buildChunksProjection() (*TSDBProjection, error) {
 	g := make(parquet.Group)
 	skipPageBoundsOpts := make([]parquet.WriterOption, 0, len(s.DataColsIndexes))
 

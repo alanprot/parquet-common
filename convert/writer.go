@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/efficientgo/core/errors"
 	"github.com/hashicorp/go-multierror"
 	"github.com/parquet-go/parquet-go"
 	"github.com/prometheus/prometheus/util/zeropool"
@@ -111,10 +110,7 @@ func (c *ShardedWriter) writeFile(ctx context.Context, schema *schema.TSDBSchema
 		fileOpts = append(fileOpts, parquet.KeyValueMetadata(k, v))
 	}
 
-	transformations, err := c.transformations()
-	if err != nil {
-		return 0, err
-	}
+	transformations := c.transformations()
 
 	writer, err := newSplitFileWriter(ctx, c.bkt, schema.Schema, transformations,
 		fileOpts...,
@@ -136,21 +132,11 @@ func (c *ShardedWriter) writeFile(ctx context.Context, schema *schema.TSDBSchema
 	return n, nil
 }
 
-func (c *ShardedWriter) transformations() (map[string]*schema.TSDBProjection, error) {
-	lblsProjection, err := c.s.LabelsProjection()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to get label projection")
-	}
-
-	chksProjection, err := c.s.ChunksProjection()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to create chunk projection")
-	}
-
+func (c *ShardedWriter) transformations() map[string]*schema.TSDBProjection {
 	return map[string]*schema.TSDBProjection{
-		schema.LabelsPfileNameForShard(c.name, c.currentShard): lblsProjection,
-		schema.ChunksPfileNameForShard(c.name, c.currentShard): chksProjection,
-	}, nil
+		schema.LabelsPfileNameForShard(c.name, c.currentShard): c.s.LabelsProjection,
+		schema.ChunksPfileNameForShard(c.name, c.currentShard): c.s.ChunksProjection,
+	}
 }
 
 var _ parquet.RowWriter = &splitPipeFileWriter{}

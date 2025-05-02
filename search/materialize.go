@@ -35,45 +35,30 @@ import (
 type Materializer struct {
 	lf *parquet.File
 	cf *parquet.File
-	s  *schema.TSDBSchema
 	d  *schema.PrometheusParquetChunksDecoder
 
 	colIdx      int
 	concurrency int
-
-	dataColToIndex []int
 }
 
-func NewMaterializer(s *schema.TSDBSchema, d *schema.PrometheusParquetChunksDecoder, lf, cf *parquet.File) (*Materializer, error) {
+func NewMaterializer(d *schema.PrometheusParquetChunksDecoder, lf, cf *parquet.File) (*Materializer, error) {
 	colIdx, ok := lf.Schema().Lookup(schema.ColIndexes)
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("schema index %s not found", schema.ColIndexes))
 	}
 
-	dataColToIndex := make([]int, len(cf.Schema().Columns()))
-	for i := 0; i < len(s.DataColsIndexes); i++ {
-		c, ok := cf.Schema().Lookup(schema.DataColumn(i))
-		if !ok {
-			return nil, errors.New(fmt.Sprintf("schema column %s not found", schema.DataColumn(i)))
-		}
-
-		dataColToIndex[i] = c.ColumnIndex
-	}
-
 	return &Materializer{
-		s:              s,
-		d:              d,
-		lf:             lf,
-		cf:             cf,
-		colIdx:         colIdx.ColumnIndex,
-		concurrency:    runtime.GOMAXPROCS(0),
-		dataColToIndex: dataColToIndex,
+		d:           d,
+		lf:          lf,
+		cf:          cf,
+		colIdx:      colIdx.ColumnIndex,
+		concurrency: runtime.GOMAXPROCS(0),
 	}, nil
 }
 
 // Materialize reconstructs the ChunkSeries that belong to the specified row ranges (rr).
 // It uses the row group index (rgi) and time bounds (mint, maxt) to filter and decode the series.
-func (m *Materializer) Materialize(ctx context.Context, rgi int, mint, maxt int64, rr []rowRange) ([]storage.ChunkSeries, error) {
+func (m *Materializer) Materialize(ctx context.Context, rgi int, dataCols []string, rr []rowRange) ([]storage.ChunkSeries, error) {
 	sLbls, err := m.materializeLabels(ctx, rgi, rr)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error materializing labels")
@@ -87,7 +72,7 @@ func (m *Materializer) Materialize(ctx context.Context, rgi int, mint, maxt int6
 		}
 	}
 
-	chks, err := m.materializeChunks(ctx, rgi, mint, maxt, rr)
+	chks, err := m.materializeChunks(ctx, rgi, dataCols, rr)
 	if err != nil {
 		return nil, errors.Wrap(err, "materializer failed to materialize chunks")
 	}
@@ -159,9 +144,7 @@ func (m *Materializer) materializeLabels(ctx context.Context, rgi int, rr []rowR
 	return results, nil
 }
 
-func (m *Materializer) materializeChunks(ctx context.Context, rgi int, mint, maxt int64, rr []rowRange) ([][]chunks.Meta, error) {
-	minDataCol := m.s.DataColumIdx(mint)
-	maxDataCol := m.s.DataColumIdx(maxt)
+func (m *Materializer) materializeChunks(ctx context.Context, rgi int, dataCols []string, rr []rowRange) ([][]chunks.Meta, error) {
 	rg := m.cf.RowGroups()[rgi]
 	totalRows := int64(0)
 	for _, r := range rr {
@@ -169,14 +152,18 @@ func (m *Materializer) materializeChunks(ctx context.Context, rgi int, mint, max
 	}
 	r := make([][]chunks.Meta, totalRows)
 
-	for i := minDataCol; i <= maxDataCol; i++ {
-		values, err := m.materializeColumn(ctx, rg, rg.ColumnChunks()[m.dataColToIndex[i]], rr)
+	for _, col := range dataCols {
+		ci, ok := m.cf.Schema().Lookup(col)
+		if !ok {
+			return nil, fmt.Errorf("column %s not found in schema", col)
+		}
+		values, err := m.materializeColumn(ctx, rg, rg.ColumnChunks()[ci.ColumnIndex], rr)
 		if err != nil {
 			return r, err
 		}
 
 		for vi, value := range values {
-			chks, err := m.d.Decode(value.ByteArray(), mint, maxt)
+			chks, err := m.d.Decode(value.ByteArray())
 			if err != nil {
 				return r, errors.Wrap(err, "failed to decode chunks")
 			}
