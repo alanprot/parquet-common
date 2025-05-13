@@ -41,9 +41,9 @@ func NewParquetQueryable(d *schema.PrometheusParquetChunksDecoder, blocksFinder 
 
 func (p parquetQueryable) Querier(mint, maxt int64) (prom_storage.Querier, error) {
 	blocks := p.blocksFinder(mint, maxt)
-	qBlocks := make([]*queryableBlock, len(blocks))
+	qBlocks := make([]*QueryableShard, len(blocks))
 	for i, b := range blocks {
-		qb, err := newQueryableBlock(b, p.d)
+		qb, err := NewQueryableShard(b, p.d)
 		if err != nil {
 			return nil, err
 		}
@@ -60,7 +60,7 @@ func (p parquetQueryable) Querier(mint, maxt int64) (prom_storage.Querier, error
 type parquetQuerier struct {
 	mint, maxt int64
 
-	blocks []*queryableBlock
+	blocks []*QueryableShard
 }
 
 func (p parquetQuerier) LabelValues(ctx context.Context, name string, hints *prom_storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
@@ -130,12 +130,12 @@ func (p parquetQuerier) Select(ctx context.Context, sorted bool, sp *prom_storag
 	return convert.NewSeriesSetFromChunkSeriesSet(ss, skipChunks)
 }
 
-type queryableBlock struct {
+type QueryableShard struct {
 	block *storage.ParquetShard
 	m     *Materializer
 }
 
-func newQueryableBlock(block *storage.ParquetShard, d *schema.PrometheusParquetChunksDecoder) (*queryableBlock, error) {
+func NewQueryableShard(block *storage.ParquetShard, d *schema.PrometheusParquetChunksDecoder) (*QueryableShard, error) {
 	s, err := block.TSDBSchema()
 	if err != nil {
 		return nil, err
@@ -145,13 +145,13 @@ func newQueryableBlock(block *storage.ParquetShard, d *schema.PrometheusParquetC
 		return nil, err
 	}
 
-	return &queryableBlock{
+	return &QueryableShard{
 		block: block,
 		m:     m,
 	}, nil
 }
 
-func (b queryableBlock) Query(ctx context.Context, sorted bool, mint, maxt int64, skipChunks bool, matchers []*labels.Matcher) (prom_storage.ChunkSeriesSet, error) {
+func (b QueryableShard) Query(ctx context.Context, sorted bool, mint, maxt int64, skipChunks bool, matchers []*labels.Matcher) (prom_storage.ChunkSeriesSet, error) {
 	cs, err := MatchersToConstraint(matchers...)
 	if err != nil {
 		return nil, err
@@ -180,7 +180,7 @@ func (b queryableBlock) Query(ctx context.Context, sorted bool, mint, maxt int64
 	return convert.NewChunksSeriesSet(results), nil
 }
 
-func (b queryableBlock) LabelNames(ctx context.Context, matchers []*labels.Matcher) ([][]string, error) {
+func (b QueryableShard) LabelNames(ctx context.Context, matchers []*labels.Matcher) ([][]string, error) {
 	if len(matchers) == 0 {
 		return [][]string{b.m.MaterializeAllLabelNames()}, nil
 	}
@@ -209,7 +209,7 @@ func (b queryableBlock) LabelNames(ctx context.Context, matchers []*labels.Match
 	return results, nil
 }
 
-func (b queryableBlock) LabelValues(ctx context.Context, name string, matchers []*labels.Matcher) ([][]string, error) {
+func (b QueryableShard) LabelValues(ctx context.Context, name string, matchers []*labels.Matcher) ([][]string, error) {
 	if len(matchers) == 0 {
 		return b.allLabelValues(ctx, name)
 	}
@@ -238,7 +238,7 @@ func (b queryableBlock) LabelValues(ctx context.Context, name string, matchers [
 	return results, nil
 }
 
-func (b queryableBlock) allLabelValues(ctx context.Context, name string) ([][]string, error) {
+func (b QueryableShard) allLabelValues(ctx context.Context, name string) ([][]string, error) {
 	results := make([][]string, len(b.block.LabelsFile().RowGroups()))
 	for i := range b.block.LabelsFile().RowGroups() {
 		series, err := b.m.MaterializeAllLabelValues(ctx, name, i)
